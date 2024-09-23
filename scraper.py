@@ -5,6 +5,7 @@ from selenium.webdriver.support.expected_conditions import visibility_of_element
 from selenium.webdriver.support.expected_conditions import element_to_be_clickable
 from selenium.webdriver.common.by import By
 from selenium import webdriver
+from playsound import playsound
 import os
 import time
 
@@ -65,6 +66,7 @@ class WebScraper(webdriver.Chrome):
         ubi = '//*[@id="wc-button"]'
         try:
             WebDriverWait(self, 10).until(element_to_be_clickable((By.XPATH, ubi)))
+            time.sleep(3)
             self.find_element(By.XPATH, ubi).click()
         except TimeoutException:
             print('No se ha podido encontrar el boton de chatbot')
@@ -79,64 +81,105 @@ class WebScraper(webdriver.Chrome):
             return False
         # Asegurar que el bot esta activo
         while True:
-            if len(contenedor_chat.find_elements(By.TAG_NAME, 'li')) > 2:
+            respuestas = contenedor_chat.find_elements(By.TAG_NAME, 'li')
+            if len(respuestas) > 2:
                 break
             time.sleep(0.1)
+        self.bot.append(respuestas[-1].text.strip().replace('\n', ' '))
         print('Dentro del chatbot')
+        print(f'Bot: {self.bot[-1]}')
         return True
 
-    def actualizar_conversacion(self):
-        """Anadir respuestas a la conversacion"""
-        respuestas = len(self.bot)
-        secs = int(time.time())
-        # Capturar los mensajes
+    def cheq_opciones(self):
+        time.sleep(2)
         chat = self.find_element(By.XPATH, '//*[@id="bm-entries-ul"]')
-        while True:
-            filas_chat = chat.find_elements(By.TAG_NAME, 'li')
-            for fila in filas_chat:
-                # Si existe una respuesta y se ha esperado otra respuesta durante mas de tres segundos, volver
-                if len(self.bot) == respuestas:
-                    # Si no hay respuesta, reiniciar segundero
-                    secs = time.time()
-                elif int(secs - time.time()) > 3:
-                    # Si existe una o mas respuestas y se ha esperado otra durante mas de tres segundos, volver
-                    return True
-                ubicacion = fila.get_attribute('style')
-                if not ubicacion:
-                    # Una fila donde solo se muestra fecha y hora u opciones
-                    continue
-                ubicacion = ubicacion.split('-')[-1].replace(';', '').strip()
-                texto = fila.text.strip()
-                # Guardar chat en listas
-                if ubicacion == 'start':
-                    if texto in self.bot:
-                        continue
-                    self.bot.append(texto)
-                elif ubicacion == 'end':
-                    if texto in self.yo:
-                        continue
-                    self.yo.append(texto)
-                else:
-                    continue
+        WebDriverWait(self, 30).until(
+            lambda x: chat.find_elements(By.TAG_NAME, 'li')[-1].get_attribute('class') == 'bm-webchat-pills-li')
+
+    def ingresar_datos_pers(self):
+        """Ingresar datos personales al principio de la conversacion"""
+        self.responder(os.getenv('DNI'))
+        chat = self.find_element(By.XPATH, '//*[@id="bm-entries-ul"]')
+        WebDriverWait(self, 15).until(
+            lambda x: '(DDMMAAAA)' in chat.find_elements(By.TAG_NAME, 'li')[-1].text)
+        self.actualizar_conversacion()
+        self.responder(os.getenv('NACIMIENTO'))
+
+    def actualizar_conversacion(self):
+        """Anadir respuestas a la conversacion. Minimo una respuesta nueva"""
+        chat = self.find_element(By.XPATH, '//*[@id="bm-entries-ul"]')
+        filas_chat = chat.find_elements(By.TAG_NAME, 'li')
+        texto = filas_chat[-2].text.strip().replace('\n', ' ')
+        if texto == self.bot[-1]:
+            time.sleep(0.5)
+            return True
+        self.bot.append(texto)
+        print(f'Bot: {texto}')
+        return True
 
     def responder(self, respuesta: str):
         """Responderle al chatbot"""
         # Ingresar texto
         self.find_element(By.XPATH, '//*[@id="wc-textarea"]').send_keys(respuesta)
+
         boton = '/html/body/div/div/div/div[4]/div[2]/div/button'
         try:
             WebDriverWait(self, 3).until(element_to_be_clickable((By.XPATH, boton)))
         except TimeoutException:
             print('No se ha encontrado el boton para enviar mensaje')
             return False
+
         self.find_element(By.XPATH, boton).click()
         self.yo.append(respuesta)
+        print(f'\tYo: {respuesta}')
+
+        if respuesta == '40540531':
+            return True
+
+        self.cheq_opciones()
+        self.actualizar_conversacion()
         return True
 
+    def get_fechas(self):
+        """Obtener fechas dentro de botones en la ultima fila de conversacion"""
+        chat = self.find_element(By.XPATH, '//*[@id="bm-entries-ul"]')
+        ult_fila = chat.find_elements(By.TAG_NAME, 'li')[-1]
+        opciones = ult_fila.find_elements(By.TAG_NAME, 'button')
+        fechas = set()
+        for boton in opciones:
+            if 'menu' in boton.text:
+                continue
+            fechas.add(boton.text)
+        print(fechas)
+        return fechas
 
-if __name__ == '__main__':
-    ws = WebScraper()
-    ws.pagina_municipio()
-    ws.autogestion_turnos()
-    input('ENTER cuando termine el testeo')
-    ws.quit()
+    def buscar_turnos(self, fechas_pref: set[str]):
+        """
+        Loop para buscar turnos deseados
+        :param fechas_pref: set con fechas a buscar, ej.: {'20/09/2030', '21/09/2030', ...}
+        """
+        while True:
+            self.actualizar_conversacion()
+            if 'empezamos?' in self.bot[-1] and self.yo[-1] != 'Turnos':
+                self.responder('Turnos')
+            elif 'deseada' in self.bot[-1] and self.yo[-1] != 'Nuevos turnos':
+                self.responder('Nuevos turnos')
+            elif 'sacar un turno' in self.bot[-1] and self.yo[-1] != 'Lic. de conducir':
+                self.responder('Lic. de conducir')
+            elif 'DNI:' in self.bot[-1] and self.yo[-1] != 'Si':
+                self.responder('Si')
+            elif 'licencia de conducir' in self.bot[-1] and self.yo[-1] != 'Original':
+                self.responder('Original')
+            elif 'dirección de mail' in self.bot[-1] and self.yo[-1] != os.getenv('CORREO'):
+                self.responder(os.getenv('CORREO'))
+            elif 'Qué día te conviene más' in self.bot[-1]:
+                if self.get_fechas().isdisjoint(fechas_pref):
+                    self.responder('Volver al menu')
+                    print('Esperando 10 minutos para volver a intentar')
+                    time.sleep(600)
+                else:
+                    print('Fecha encontrada!  Ctrl+C para terminar')
+                    try:
+                        playsound('ringtone.mp3')
+                    except KeyboardInterrupt:
+                        exit(0)
