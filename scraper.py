@@ -133,7 +133,7 @@ class WebScraper(webdriver.Chrome):
         self.yo.append(respuesta)
         print(f'\tYo: {respuesta}')
 
-        if respuesta == '40540531':
+        if respuesta == os.getenv('DNI'):
             return True
 
         self.cheq_opciones()
