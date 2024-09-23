@@ -1,13 +1,17 @@
 from scraper import WebScraper
-import time
+from bienvenida import bienvenida, fechas_deseadas
+import os
+import dotenv
 
 
 if __name__ == '__main__':
-    scraper = WebScraper()
+    if 'config.env' not in os.listdir():
+        if not bienvenida():
+            exit(1)
+    dotenv.load_dotenv('config.env')
+    fechas_preferencia = set(fechas_deseadas().split(' - '))
+    scraper = WebScraper(headless=True)
     scraper.pagina_municipio()
     scraper.autogestion_turnos()
-    scraper.actualizar_conversacion()
-    if 'Ingresa tu DNI' in scraper.bot[-1]:
-        scraper.responder('dni')
-    if '(DDMMAAAA)' in scraper.bot[-1]:
-        scraper.responder('fecha de nacimiento')
+    scraper.ingresar_datos_pers()
+    scraper.buscar_turnos(fechas_preferencia)
